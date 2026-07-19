@@ -1,0 +1,27 @@
+{
+  "appId": "com.accessible.audiobookplayer",
+  "productName": "AccessibleAudiobookPlayer",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist-electron/**/*",
+    "dist/**/*"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "zip",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "category": "Audio"
+  }
+}

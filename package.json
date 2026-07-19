@@ -1,0 +1,42 @@
+{
+  "name": "accessible-audiobook-player",
+  "version": "0.1.0",
+  "description": "Accessibility-first audiobook and music player for Windows and Linux.",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build && electron-builder",
+    "compile-main": "tsc -p tsconfig.node.json",
+    "electron:dev": "vite",
+    "electron:build": "npm run compile-main && vite build && electron-builder"
+  },
+  "keywords": [
+    "audiobook",
+    "player",
+    "accessibility",
+    "nvda",
+    "orca",
+    "music-player",
+    "windows",
+    "linux"
+  ],
+  "author": "",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "lucide-react": "^0.379.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^30.0.6",
+    "electron-builder": "^24.13.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11",
+    "vite-plugin-electron": "^0.28.6",
+    "vite-plugin-electron-renderer": "^0.14.5"
+  }
+}
