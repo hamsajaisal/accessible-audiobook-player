@@ -86,6 +86,7 @@ class AccessibleAudiobookPlayer(QMainWindow):
         file_menu = self.menu_bar.addMenu("&File")
         file_menu.addAction("&Open Folder", self.select_folder)
         file_menu.addAction("Open &File", self.select_file)
+        file_menu.addAction("&Import Folder to Library", self.import_folder_to_library)
         file_menu.addSeparator()
         file_menu.addAction("Backup Database", self.backup_database)
         file_menu.addAction("Restore Database", self.restore_database)
@@ -604,6 +605,33 @@ class AccessibleAudiobookPlayer(QMainWindow):
             else:
                 announce("Error restoring database")
 
+    def export_book_metadata(self):
+        if not self.book_id:
+            announce("No audiobook loaded. Please load an audiobook first.")
+            QMessageBox.warning(self, "Export Failed", "No audiobook loaded. Please load an audiobook first.")
+            return
+        dest, _ = QFileDialog.getSaveFileName(self, "Export Bookmarks/Clips", "book_metadata.json", "JSON Files (*.json)")
+        if dest:
+            if self.db.export_book_data(self.book_id, dest):
+                announce("Bookmarks and clips exported successfully")
+            else:
+                announce("Error exporting bookmarks and clips")
+
+    def import_book_metadata(self):
+        if not self.book_id:
+            announce("No audiobook loaded. Please load an audiobook first.")
+            QMessageBox.warning(self, "Import Failed", "No audiobook loaded. Please load an audiobook first.")
+            return
+        src, _ = QFileDialog.getOpenFileName(self, "Import Bookmarks/Clips", "", "JSON Files (*.json)")
+        if src:
+            success, err = self.db.import_book_data(self.book_id, src)
+            if success:
+                self.load_metadata()
+                announce("Bookmarks and clips imported successfully")
+            else:
+                announce(f"Error importing bookmarks and clips: {err}")
+                QMessageBox.critical(self, "Import Error", f"Failed to import metadata:\n{err}")
+
     # File and Folder selection
     def select_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Audiobook Folder")
@@ -614,6 +642,46 @@ class AccessibleAudiobookPlayer(QMainWindow):
         file, _ = QFileDialog.getOpenFileName(self, "Select Audio File", "", "Audio Files (*.mp3 *.wav *.flac *.m4a *.m4b *.ogg *.opus)")
         if file:
             self.load_book(file, is_folder=False)
+
+    def import_folder_to_library(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Audiobook Folder to Import")
+        if not folder:
+            return
+            
+        from db_manager import LIBRARY_DIR
+        import shutil
+        
+        folder_name = os.path.basename(os.path.normpath(folder))
+        dest_folder = os.path.join(LIBRARY_DIR, folder_name)
+        
+        if os.path.exists(dest_folder):
+            announce(f"A folder named {folder_name} already exists in the library.")
+            res = QMessageBox.question(
+                self, "Overwrite Folder?", 
+                f"A folder named '{folder_name}' already exists in your library. Do you want to overwrite it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if res == QMessageBox.StandardButton.No:
+                return
+            try:
+                shutil.rmtree(dest_folder)
+            except Exception as e:
+                announce("Failed to remove existing folder")
+                QMessageBox.critical(self, "Error", f"Failed to overwrite folder:\n{str(e)}")
+                return
+                
+        announce(f"Importing {folder_name}. Please wait.")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            shutil.copytree(folder, dest_folder)
+            announce(f"Import completed successfully. Loaded {folder_name}")
+            self.refresh_library()
+            self.load_book(dest_folder, is_folder=True)
+        except Exception as e:
+            announce("Import failed")
+            QMessageBox.critical(self, "Import Error", f"Failed to copy files:\n{str(e)}")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def load_book(self, path, is_folder):
         self.stop_playback()
@@ -1191,17 +1259,63 @@ class AccessibleAudiobookPlayer(QMainWindow):
             
         self.tracks_label.setText(f"Tracks ({len(self.track_list)})")
 
-    # Library history list
+    # Library history and managed list
     def refresh_library(self):
         self.library_list.clear()
-        for r in self.db.get_history_list():
-            display = os.path.basename(r["bookId"])
-            item = QListWidgetItem(display)
-            item.setData(Qt.ItemDataRole.UserRole, r["bookId"])
-            self.library_list.addItem(item)
+        
+        from db_manager import LIBRARY_DIR
+        
+        # 1. Add Managed Books
+        managed_books = []
+        if os.path.exists(LIBRARY_DIR):
+            try:
+                for entry in os.scandir(LIBRARY_DIR):
+                    if entry.is_dir():
+                        managed_books.append(entry.path)
+            except Exception as e:
+                print("Error scanning library dir", e)
+        
+        managed_books.sort(key=lambda p: os.path.basename(p).lower())
+        
+        if managed_books:
+            header_item = QListWidgetItem("--- LIBRARY BOOKS ---")
+            header_item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.library_list.addItem(header_item)
+            
+            for path in managed_books:
+                display = os.path.basename(path)
+                item = QListWidgetItem(f"📁 {display}")
+                item.setData(Qt.ItemDataRole.UserRole, path)
+                self.library_list.addItem(item)
+        
+        # 2. Add Recent / External Books
+        recent_records = self.db.get_history_list()
+        external_records = []
+        for r in recent_records:
+            book_path = r["bookId"]
+            is_managed = False
+            try:
+                is_managed = os.path.abspath(book_path).lower().startswith(os.path.abspath(LIBRARY_DIR).lower())
+            except:
+                pass
+            if not is_managed:
+                external_records.append(r)
+                
+        if external_records:
+            header_item = QListWidgetItem("--- EXTERNAL / RECENT ---")
+            header_item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.library_list.addItem(header_item)
+            
+            for r in external_records:
+                display = os.path.basename(r["bookId"])
+                item = QListWidgetItem(f"🔗 {display}")
+                item.setData(Qt.ItemDataRole.UserRole, r["bookId"])
+                self.library_list.addItem(item)
 
     def on_library_item_clicked(self, item):
         book_path = item.data(Qt.ItemDataRole.UserRole)
+        if not book_path:
+            return
         is_folder = os.path.isdir(book_path)
         self.load_book(book_path, is_folder)
 
