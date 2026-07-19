@@ -2,7 +2,7 @@
   "name": "accessible-audiobook-player",
   "version": "0.1.0",
   "description": "Accessibility-first audiobook and music player for Windows and Linux.",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/index.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",

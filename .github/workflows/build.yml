@@ -27,7 +27,20 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Compile and Bundle App
-        run: npm run build
+      - name: Compile and Bundle App (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          npm run compile-main
+          npx vite build
+          npx electron-builder --win
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile and Bundle App (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          npm run compile-main
+          npx vite build
+          npx electron-builder --linux
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
