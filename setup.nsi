@@ -5,7 +5,7 @@
 !define DESCRIPTION "Accessibility-first audiobook and music player"
 !define VERSIONMAJOR 1
 !define VERSIONMINOR 1
-!define VERSIONBUILD 3
+!define VERSIONBUILD 4
 
 Name "${APPNAME}"
 OutFile "dist\AccessibleAudiobookPlayer-Setup.exe"
@@ -18,8 +18,13 @@ RequestExecutionLevel admin
 
 ; MUI Pages
 !insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+
+; Finish page option to launch the app
+!define MUI_FINISHPAGE_RUN "$INSTDIR\AccessibleAudiobookPlayer.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch ${APPNAME}"
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_WELCOME
@@ -30,7 +35,8 @@ RequestExecutionLevel admin
 ; Language files
 !insertmacro MUI_LANGUAGE "English"
 
-Section "Install"
+Section "Accessible Audiobook Player (Required)" SecApp
+  SectionIn RO
   SetOutPath $INSTDIR
   File "dist\AccessibleAudiobookPlayer.exe"
   
@@ -45,16 +51,27 @@ Section "Install"
   
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
   CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\AccessibleAudiobookPlayer.exe" "" "$INSTDIR\AccessibleAudiobookPlayer.exe" 0
+SectionEnd
+
+Section "Create Desktop Shortcut" SecDesktop
   CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\AccessibleAudiobookPlayer.exe" "" "$INSTDIR\AccessibleAudiobookPlayer.exe" 0
 SectionEnd
+
+; Descriptions
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecApp} "Installs the core files for Accessible Audiobook Player."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} "Creates a shortcut to launch the app from your desktop."
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 Section "Uninstall"
   Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
   RMDir "$SMPROGRAMS\${APPNAME}"
   Delete "$DESKTOP\${APPNAME}.lnk"
+  
   Delete "$INSTDIR\AccessibleAudiobookPlayer.exe"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
+  
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
   DeleteRegKey HKLM "Software\${APPNAME}"
 SectionEnd

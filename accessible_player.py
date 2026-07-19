@@ -16,11 +16,22 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from db_manager import DBManager
 
 def announce(text):
-    """Asynchronously speak text using Windows PowerShell Speech Synthesis (zero dependency)."""
-    # Escaping double quotes
-    escaped_text = text.replace('"', '\\"')
-    ps_cmd = f'Add-Type –AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{escaped_text}")'
-    subprocess.Popen(['powershell', '-Command', ps_cmd], creationflags=subprocess.CREATE_NO_WINDOW)
+    """Announce text natively to assistive technologies (screen readers) using QAccessibleAnnouncementEvent."""
+    try:
+        from PyQt6.QtGui import QAccessible, QAccessibleAnnouncementEvent
+        from PyQt6.QtWidgets import QApplication
+        
+        app = QApplication.instance()
+        if app:
+            target = app.activeWindow() or app
+            event = QAccessibleAnnouncementEvent(target, text)
+            QAccessible.updateAccessibility(event)
+            return
+    except Exception as e:
+        print("Screen reader announcement failed:", e)
+    
+    # Console fallback
+    print(f"[Announcement] {text}")
 
 class AccessibleAudiobookPlayer(QMainWindow):
     def __init__(self):
