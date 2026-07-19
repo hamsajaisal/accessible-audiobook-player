@@ -20,7 +20,7 @@
     "windows",
     "linux"
   ],
-  "author": "",
+  "author": "hamsajaisal <hamsajaisal@users.noreply.github.com>",
   "license": "GPL-3.0",
   "dependencies": {
     "lucide-react": "^0.379.0"
