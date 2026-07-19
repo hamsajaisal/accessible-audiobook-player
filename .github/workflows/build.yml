@@ -27,23 +27,27 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt6 pyinstaller
 
+      - name: Install NSIS
+        run: |
+          choco install nsis -y
+
       - name: Build Standalone Executable
         run: |
           pyinstaller --noconsole --onefile --name "AccessibleAudiobookPlayer" accessible_player.py
 
       - name: Compile NSIS Windows Installer
         run: |
-          makensis setup.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" setup.nsi
 
       - name: Zip Executable
         run: |
-          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.1.0-win.zip
+          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.1.2-win.zip
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/AccessibleAudiobookPlayer-Setup.exe
-            dist/AccessibleAudiobookPlayer-v1.1.0-win.zip
+            dist/AccessibleAudiobookPlayer-v1.1.2-win.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
