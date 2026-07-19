@@ -604,12 +604,54 @@ export default function App() {
       } else if (e.code === 'PageDown') {
         e.preventDefault()
         handleTrackChange('next')
+      } else if (e.code === 'KeyB') {
+        e.preventDefault()
+        addBookmark()
+      } else if (e.code === 'KeyS') {
+        e.preventDefault()
+        const speeds = [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+        const currentIndex = speeds.indexOf(speed)
+        const nextSpeed = speeds[(currentIndex + 1) % speeds.length]
+        setSpeed(nextSpeed)
+        announce(`Speed changed to ${nextSpeed}x`)
+      } else if (e.code === 'KeyR') {
+        e.preventDefault()
+        const nextMode = repeatMode === 'off' ? 'track' : repeatMode === 'track' ? 'all' : 'off'
+        setRepeatMode(nextMode)
+        announce(`Repeat mode set to ${nextMode === 'off' ? 'repeat off' : nextMode === 'track' ? 'repeat single track' : 'repeat all tracks'}`)
+      } else if (e.code === 'KeyH') {
+        e.preventDefault()
+        setIsShuffle(prev => {
+          const next = !prev
+          announce(next ? 'Shuffle play active' : 'Shuffle play inactive')
+          return next
+        })
+      } else if (e.code === 'KeyT') {
+        e.preventDefault()
+        setActiveTab(prev => {
+          const next = prev === 'media' ? 'stats' : 'media'
+          announce(`Switched to ${next === 'media' ? 'Clips and Bookmarks' : 'Statistics'} tab`)
+          return next
+        })
+      } else if (e.code === 'KeyL') {
+        e.preventDefault()
+        setHighlightStart(Math.floor(currentTime).toString())
+        announce(`Start time set to ${formatTime(currentTime)}`)
+      } else if (e.code === 'KeyK') {
+        e.preventDefault()
+        setHighlightEnd(Math.floor(currentTime).toString())
+        announce(`End time set to ${formatTime(currentTime)}`)
+      } else if (e.code === 'KeyN') {
+        e.preventDefault()
+        const inputEl = document.querySelector('input[placeholder="Bookmark description"]') as HTMLInputElement
+        if (inputEl) inputEl.focus()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isPlaying, currentTrackIndex, trackList, volume, currentTime, skipInterval])
+  }, [isPlaying, currentTrackIndex, trackList, volume, currentTime, skipInterval, speed, repeatMode])
+
 
   // Helpers
   const formatTime = (seconds: number) => {
