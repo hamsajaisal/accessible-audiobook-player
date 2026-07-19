@@ -45,3 +45,11 @@ export interface BookHistory {
   lastVolume: number;
   lastPlayedAt: string;
 }
+
+export interface UserSettings {
+  rewindSeconds: number;
+  theme: 'light' | 'dark' | 'high-contrast';
+  buttonSize: 'small' | 'normal' | 'large';
+  defaultSpeed: number;
+  verbosity: 'verbose' | 'normal' | 'minimal';
+}

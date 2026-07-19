@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Folder, File, Plus, Trash2, Eye, Sun, Moon, Accessibility } from 'lucide-react'
-import { Bookmark, Highlight, BookHistory } from '../shared/types'
+import { Bookmark, Highlight, BookHistory, UserSettings, Collection } from '../shared/types'
 
 export default function App() {
   // App States
@@ -37,8 +37,24 @@ export default function App() {
   const [isShuffle, setIsShuffle] = useState<boolean>(false)
   const [repeatMode, setRepeatMode] = useState<'off' | 'track' | 'all'>('off')
   const [stats, setStats] = useState<Record<string, number>>({})
-  const [activeTab, setActiveTab] = useState<'media' | 'stats'>('media')
+  const [activeTab, setActiveTab] = useState<'media' | 'stats' | 'collections' | 'settings' | 'help'>('media')
   const [jumpTimeInput, setJumpTimeInput] = useState<string>('')
+
+  // New settings and playlist states
+  const [recentBooks, setRecentBooks] = useState<BookHistory[]>([])
+  const [settings, setSettings] = useState<UserSettings>({ rewindSeconds: 3, theme: 'dark', buttonSize: 'normal', defaultSpeed: 1.0, verbosity: 'normal' })
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [skippedTracks, setSkippedTracks] = useState<string[]>([])
+  const [sleepMode, setSleepMode] = useState<'off' | '10' | '20' | 'track'>('off')
+  const [sleepTimer, setSleepTimer] = useState<number | null>(null) // minutes remaining
+  const [sleepTimerActive, setSleepTimerActive] = useState<boolean>(false)
+  const [tagFilter, setTagFilter] = useState<string>('')
+  const [updateStatus, setUpdateStatus] = useState<string>('idle')
+  const [newCollectionName, setNewCollectionName] = useState<string>('')
+  const [newCollectionDesc, setNewCollectionDesc] = useState<string>('')
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string>('')
+
+  const sleepIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Screen Reader Accessibility Announcements
   const [srAnnouncement, setSrAnnouncement] = useState<string>('')
@@ -164,11 +180,119 @@ export default function App() {
     return () => removeCloseListener()
   }, [bookId, currentTrackIndex, volume, speed, trackList])
 
+  // Load Settings on start
+  const loadSettings = async () => {
+    const loadedSettings = await window.electronAPI.getSettings()
+    if (loadedSettings) {
+      setSettings(loadedSettings)
+      setTheme(loadedSettings.theme)
+      const sizeMap: Record<'small' | 'normal' | 'large', number> = { small: 14, normal: 16, large: 20 }
+      setFontSize(sizeMap[loadedSettings.buttonSize] || 16)
+      setSpeed(loadedSettings.defaultSpeed || 1.0)
+    }
+  }
+
+  useEffect(() => {
+    loadSettings()
+    window.electronAPI.getHistoryList().then(setRecentBooks)
+    window.electronAPI.getCollections().then(setCollections)
+  }, [])
+
   useEffect(() => {
     if (activeTab === 'stats') {
       window.electronAPI.getStats().then(setStats)
     }
   }, [activeTab])
+
+  useEffect(() => {
+    const removeListener = window.electronAPI.onUpdateStatus((status) => {
+      setUpdateStatus(status)
+      if (status === 'checking') {
+        announce('Checking for updates...')
+      } else if (status === 'available') {
+        announce('An update is available and downloading in the background.')
+      } else if (status === 'not-available') {
+        announce('You are running the latest version.')
+      } else if (status === 'downloaded') {
+        announce('Update downloaded. Ready to restart and install.')
+      } else if (status.startsWith('error')) {
+        announce('Error checking for updates.')
+      }
+    })
+    return () => removeListener()
+  }, [])
+
+  // Sleep Timer countdown Effect
+  useEffect(() => {
+    if (sleepTimerActive && sleepTimer !== null) {
+      sleepIntervalRef.current = setInterval(() => {
+        setSleepTimer(prev => {
+          if (prev === null) return null
+          if (prev <= 1) {
+            clearInterval(sleepIntervalRef.current!)
+            setSleepTimerActive(false)
+            setSleepMode('off')
+            triggerSleepFadeOut()
+            return 0
+          }
+          const nextVal = prev - 1
+          if (nextVal === 5 || nextVal === 1) {
+            announce(`${nextVal} minutes remaining on sleep timer`)
+          }
+          return nextVal
+        })
+      }, 60000)
+    }
+    return () => {
+      if (sleepIntervalRef.current) clearInterval(sleepIntervalRef.current)
+    }
+  }, [sleepTimerActive, sleepTimer])
+
+  const triggerSleepFadeOut = () => {
+    if (!audioRef.current) return
+    announce('Sleep timer finished. Fading out audio.')
+    
+    if (gainNodeRef.current && audioCtxRef.current) {
+      const currentVolume = gainNodeRef.current.gain.value
+      gainNodeRef.current.gain.setValueAtTime(currentVolume, audioCtxRef.current.currentTime)
+      gainNodeRef.current.gain.linearRampToValueAtTime(0, audioCtxRef.current.currentTime + 5)
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.pause()
+          setIsPlaying(false)
+          const volPercentage = isMuted ? 0 : volume / 100
+          gainNodeRef.current!.gain.setValueAtTime(volPercentage, audioCtxRef.current!.currentTime)
+        }
+      }, 5000)
+    } else {
+      audioRef.current.pause()
+      setIsPlaying(false)
+    }
+  }
+
+  const cycleSleepTimer = () => {
+    if (sleepMode === 'off') {
+      setSleepMode('10')
+      setSleepTimer(10)
+      setSleepTimerActive(true)
+      announce('Sleep timer set to 10 minutes')
+    } else if (sleepMode === '10') {
+      setSleepMode('20')
+      setSleepTimer(20)
+      setSleepTimerActive(true)
+      announce('Sleep timer set to 20 minutes')
+    } else if (sleepMode === '20') {
+      setSleepMode('track')
+      setSleepTimer(null)
+      setSleepTimerActive(false)
+      announce('Sleep timer set to end of current track')
+    } else {
+      setSleepMode('off')
+      setSleepTimer(null)
+      setSleepTimerActive(false)
+      announce('Sleep timer turned off')
+    }
+  }
 
   // Load Bookmarks and Highlights
   const loadMetadata = async (id: string) => {
@@ -221,58 +345,199 @@ export default function App() {
     announce(`Loading track ${index + 1} of ${trackList.length}: ${fileName}`)
   }
 
-  // File & Folder selection
-  const selectFolder = async () => {
-    const folderPath = await window.electronAPI.selectFolderDialog()
-    if (!folderPath) return
-
-    const result = await window.electronAPI.loadFolder(folderPath)
-    if (result && result.files.length > 0) {
-      setBookId(folderPath)
-      setBookName(result.folderName)
-      setTrackList(result.files)
-      
-      // Load history
-      const history = await window.electronAPI.getHistory(folderPath)
-      await loadMetadata(folderPath)
-
-      if (history) {
-        const fileIdx = result.files.indexOf(history.lastFilePath)
-        const targetIdx = fileIdx !== -1 ? fileIdx : 0
-        setSpeed(history.lastSpeed)
-        setVolume(history.lastVolume)
-        loadTrack(targetIdx, history.lastPosition)
-        announce(`Loaded folder ${result.folderName}. Resuming track ${targetIdx + 1} at ${formatTime(history.lastPosition)}`)
-      } else {
-        loadTrack(0, 0)
-        announce(`Loaded folder ${result.folderName}. Starting from track 1.`)
+  // File & Folder selection & Book Loader
+  const loadBook = async (bookPath: string, isFolder: boolean) => {
+    if (isFolder) {
+      const result = await window.electronAPI.loadFolder(bookPath)
+      if (result && result.files.length > 0) {
+        setBookId(bookPath)
+        setBookName(result.folderName)
+        const filesList = await loadPlaylistSettings(bookPath, result.files)
+        const history = await window.electronAPI.getHistory(bookPath)
+        await loadMetadata(bookPath)
+        
+        if (history) {
+          const fileIdx = filesList.indexOf(history.lastFilePath)
+          const targetIdx = fileIdx !== -1 ? fileIdx : 0
+          setSpeed(history.lastSpeed)
+          setVolume(history.lastVolume)
+          loadTrack(targetIdx, history.lastPosition)
+          announce(`Loaded book ${result.folderName}. Resuming track ${targetIdx + 1} at ${formatTime(history.lastPosition)}`)
+        } else {
+          setSpeed(settings.defaultSpeed)
+          loadTrack(0, 0)
+          announce(`Loaded book ${result.folderName}. Starting from track 1.`)
+        }
       }
     } else {
-      announce('No audio files found in selected folder.')
+      const result = await window.electronAPI.loadFile(bookPath)
+      if (result) {
+        const fileName = bookPath.substring(bookPath.lastIndexOf('\\') + 1)
+        setBookId(bookPath)
+        setBookName(fileName)
+        setTrackList([bookPath])
+        setSkippedTracks([])
+        const history = await window.electronAPI.getHistory(bookPath)
+        await loadMetadata(bookPath)
+
+        if (history) {
+          setSpeed(history.lastSpeed)
+          setVolume(history.lastVolume)
+          loadTrack(0, history.lastPosition)
+          announce(`Loaded file ${fileName}. Resuming at ${formatTime(history.lastPosition)}`)
+        } else {
+          setSpeed(settings.defaultSpeed)
+          loadTrack(0, 0)
+          announce(`Loaded file ${fileName}`)
+        }
+      }
     }
+    window.electronAPI.getHistoryList().then(setRecentBooks)
+  }
+
+  const selectFolder = async () => {
+    const folderPath = await window.electronAPI.selectFolderDialog()
+    if (folderPath) loadBook(folderPath, true)
   }
 
   const selectFile = async () => {
     const filePath = await window.electronAPI.selectFileDialog()
-    if (!filePath) return
+    if (filePath) loadBook(filePath, false)
+  }
 
-    const fileName = filePath.substring(filePath.lastIndexOf('\\') + 1)
-    setBookId(filePath)
-    setBookName(fileName)
-    setTrackList([filePath])
-
-    const history = await window.electronAPI.getHistory(filePath)
-    await loadMetadata(filePath)
-
-    if (history) {
-      setSpeed(history.lastSpeed)
-      setVolume(history.lastVolume)
-      loadTrack(0, history.lastPosition)
-      announce(`Loaded file ${fileName}. Resuming at ${formatTime(history.lastPosition)}`)
-    } else {
-      loadTrack(0, 0)
-      announce(`Loaded file ${fileName}`)
+  const loadPlaylistSettings = async (id: string, initialFiles: string[]) => {
+    const plSettings = await window.electronAPI.getPlaylistSettings(id)
+    if (plSettings) {
+      setSkippedTracks(plSettings.skipped || [])
+      if (plSettings.order && plSettings.order.length === initialFiles.length) {
+        setTrackList(plSettings.order)
+        return plSettings.order
+      }
     }
+    setSkippedTracks([])
+    setTrackList(initialFiles)
+    return initialFiles
+  }
+
+  const toggleTrackSkip = async (filePath: string) => {
+    if (!bookId) return
+    let updatedSkips = [...skippedTracks]
+    if (updatedSkips.includes(filePath)) {
+      updatedSkips = updatedSkips.filter(f => f !== filePath)
+      announce('Track enabled')
+    } else {
+      updatedSkips.push(filePath)
+      announce('Track skipped')
+    }
+    setSkippedTracks(updatedSkips)
+    await window.electronAPI.savePlaylistSettings(bookId, updatedSkips, trackList)
+  }
+
+  const moveTrack = async (index: number, direction: 'up' | 'down') => {
+    const newList = [...trackList]
+    const swapWith = direction === 'up' ? index - 1 : index + 1
+    if (swapWith < 0 || swapWith >= trackList.length) return
+    
+    const temp = newList[index]
+    newList[index] = newList[swapWith]
+    newList[swapWith] = temp
+    
+    setTrackList(newList)
+    if (currentTrackIndex === index) {
+      setCurrentTrackIndex(swapWith)
+    } else if (currentTrackIndex === swapWith) {
+      setCurrentTrackIndex(index)
+    }
+    
+    if (bookId) {
+      await window.electronAPI.savePlaylistSettings(bookId, skippedTracks, newList)
+    }
+    announce(`Track moved ${direction}`)
+  }
+
+  const updateSetting = async <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
+    const updated = { ...settings, [key]: value }
+    setSettings(updated)
+    await window.electronAPI.saveSettings(updated)
+    if (key === 'theme') {
+      setTheme(value as any)
+    } else if (key === 'buttonSize') {
+      const sizeMap: Record<string, number> = { small: 14, normal: 16, large: 20 }
+      setFontSize(sizeMap[value as string] || 16)
+    }
+    announce(`Setting updated: ${key} set to ${value}`)
+  }
+
+  const createCollection = async () => {
+    const name = newCollectionName.trim()
+    if (!name) return
+    const newCol: Collection = {
+      id: Math.random().toString(36).substring(2, 9),
+      name,
+      description: newCollectionDesc.trim()
+    }
+    const updatedCols = [...collections, newCol]
+    setCollections(updatedCols)
+    await window.electronAPI.saveCollections(updatedCols)
+    setNewCollectionName('')
+    setNewCollectionDesc('')
+    announce(`Collection created: ${name}`)
+  }
+
+  const deleteCollection = async (id: string) => {
+    const updatedCols = collections.filter(c => c.id !== id)
+    setCollections(updatedCols)
+    await window.electronAPI.saveCollections(updatedCols)
+    const updatedH = highlights.map(item => item.collectionId === id ? { ...item, collectionId: null } : item)
+    setHighlights(updatedH)
+    announce('Collection deleted')
+  }
+
+  const handleBackupDb = async () => {
+    const backupPath = await window.electronAPI.backupPathDialog()
+    if (backupPath) {
+      await window.electronAPI.backupDatabase(backupPath)
+      announce('Database backup completed successfully.')
+    }
+  }
+
+  const handleRestoreDb = async () => {
+    const restorePath = await window.electronAPI.restorePathDialog()
+    if (restorePath) {
+      await window.electronAPI.restoreDatabase(restorePath)
+      announce('Database restored successfully. Please restart the application.')
+    }
+  }
+
+  const handleExportBook = async () => {
+    if (!bookId) return
+    const exportPath = await window.electronAPI.exportPathDialog()
+    if (exportPath) {
+      await window.electronAPI.exportBookData(bookId, exportPath)
+      announce('Book metadata exported successfully.')
+    }
+  }
+
+  const handleImportBook = async () => {
+    if (!bookId) return
+    const importPath = await window.electronAPI.importPathDialog()
+    if (importPath) {
+      try {
+        await window.electronAPI.importBookData(bookId, importPath)
+        loadMetadata(bookId)
+        announce('Book metadata imported successfully.')
+      } catch (err: any) {
+        announce(`Import failed: ${err.message || 'unknown error'}`)
+      }
+    }
+  }
+
+  const handleCheckForUpdates = () => {
+    window.electronAPI.checkForUpdates()
+  }
+
+  const handleInstallUpdate = () => {
+    window.electronAPI.installUpdate()
   }
 
   const getSortedHighlights = (hList: Highlight[]) => {
@@ -338,6 +603,14 @@ export default function App() {
       if (audioRef.current && !isPlaying) {
         audioRef.current.play().then(() => setIsPlaying(true)).catch(err => console.error(err))
       }
+    } else {
+      // Cross-book clip play! Load the book folder/file first
+      const isFolder = clip.bookId.includes('\\') || clip.bookId.includes('/')
+      loadBook(clip.bookId, isFolder).then(() => {
+        setTimeout(() => {
+          playClip(clip, loop)
+        }, 800)
+      })
     }
   }
 
@@ -388,9 +661,22 @@ export default function App() {
       if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
         audioCtxRef.current.resume()
       }
+
+      // Auto-rewind on Play!
+      if (audioRef.current && settings.rewindSeconds > 0 && currentTime > 0) {
+        const targetTime = Math.max(0, audioRef.current.currentTime - settings.rewindSeconds)
+        audioRef.current.currentTime = targetTime
+        setCurrentTime(targetTime)
+        if (settings.verbosity === 'verbose') {
+          announce(`Rewound ${settings.rewindSeconds} seconds`)
+        }
+      }
+
       audioRef.current.play().then(() => {
         setIsPlaying(true)
-        announce('Playing')
+        if (settings.verbosity === 'verbose') {
+          announce('Playing')
+        }
       }).catch(err => {
         console.error(err)
         announce('Playback error')
@@ -422,12 +708,16 @@ export default function App() {
   const handleTrackChange = (direction: 'next' | 'prev') => {
     if (trackList.length === 0) return
     const delta = direction === 'next' ? 1 : -1
-    const nextIndex = currentTrackIndex + delta
-    if (nextIndex >= 0 && nextIndex < trackList.length) {
-      loadTrack(nextIndex, 0)
-    } else {
-      announce(`No ${direction === 'next' ? 'next' : 'previous'} tracks available.`)
+    let nextIndex = currentTrackIndex + delta
+    
+    while (nextIndex >= 0 && nextIndex < trackList.length) {
+      if (!skippedTracks.includes(trackList[nextIndex])) {
+        loadTrack(nextIndex, 0)
+        return
+      }
+      nextIndex += delta
     }
+    announce(`No ${direction === 'next' ? 'next' : 'previous'} non-skipped tracks available.`)
   }
 
   // Track playback ticks
@@ -477,8 +767,38 @@ export default function App() {
       }
     }
 
+    const playNextTrack = (currentIndex: number) => {
+      let nextIndex = currentIndex + 1
+      while (nextIndex < trackList.length) {
+        if (!skippedTracks.includes(trackList[nextIndex])) {
+          loadTrack(nextIndex, 0)
+          return
+        }
+        nextIndex++
+      }
+      if (repeatMode === 'all') {
+        let firstIndex = 0
+        while (firstIndex < trackList.length) {
+          if (!skippedTracks.includes(trackList[firstIndex])) {
+            loadTrack(firstIndex, 0)
+            announce('Folder end reached. Repeating folder.')
+            return
+          }
+          firstIndex++
+        }
+      }
+      setIsPlaying(false)
+      announce('End of media reached.')
+    }
+
     const handleEnded = () => {
-      // Auto advance to next track (only if not in revision mode or loop clip)
+      if (sleepMode === 'track') {
+        setIsPlaying(false)
+        setSleepMode('off')
+        announce('Sleep timer finished. Playback stopped at end of track.')
+        return
+      }
+
       if (!isRevisionMode && !activeLoopClip) {
         if (repeatMode === 'track') {
           if (audioRef.current) {
@@ -487,16 +807,18 @@ export default function App() {
             announce('Repeating current track')
           }
         } else if (isShuffle) {
-          const randomIndex = Math.floor(Math.random() * trackList.length)
-          loadTrack(randomIndex, 0)
-        } else if (currentTrackIndex + 1 < trackList.length) {
-          loadTrack(currentTrackIndex + 1, 0)
-        } else if (repeatMode === 'all') {
-          loadTrack(0, 0)
-          announce('Folder end reached. Repeating folder.')
+          const availableIndices = trackList
+            .map((track, idx) => ({ track, idx }))
+            .filter(item => !skippedTracks.includes(item.track))
+          if (availableIndices.length > 0) {
+            const randomIndex = Math.floor(Math.random() * availableIndices.length)
+            loadTrack(availableIndices[randomIndex].idx, 0)
+          } else {
+            setIsPlaying(false)
+            announce('All tracks are skipped.')
+          }
         } else {
-          setIsPlaying(false)
-          announce('End of media reached.')
+          playNextTrack(currentTrackIndex)
         }
       }
     }
@@ -508,7 +830,7 @@ export default function App() {
       audio.removeEventListener('timeupdate', handleTimeUpdate)
       audio.removeEventListener('ended', handleEnded)
     }
-  }, [currentTrackIndex, trackList, activeLoopClip, isRevisionMode, currentRevisionIndex, highlights, repeatMode, isShuffle])
+  }, [currentTrackIndex, trackList, activeLoopClip, isRevisionMode, currentRevisionIndex, highlights, repeatMode, isShuffle, skippedTracks, sleepMode])
 
   // Bookmarks management
   const addBookmark = async () => {
@@ -606,6 +928,9 @@ export default function App() {
             notesInput.select()
             announce('Type notes for clip')
           }
+        } else if (e.code === 'KeyT') {
+          e.preventDefault()
+          cycleSleepTimer()
         }
         return
       }
@@ -818,35 +1143,101 @@ export default function App() {
         <section className="sidebar" aria-label="Track list">
           <h2>Tracks ({trackList.length})</h2>
           {trackList.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)' }}>No media loaded</p>
+            <div>
+              <p style={{ color: 'var(--text-muted)' }}>No media loaded</p>
+              {recentBooks.length > 0 && (
+                <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                  <h3>Library / Recent Books</h3>
+                  <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: 0 }}>
+                    {recentBooks.map(item => {
+                      const displayName = item.bookId.substring(item.bookId.lastIndexOf('\\') + 1)
+                      const isFolder = item.bookId.includes('\\') || item.bookId.includes('/')
+                      return (
+                        <li key={item.bookId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: '6px' }}>
+                          <button 
+                            className="btn-link" 
+                            onClick={() => loadBook(item.bookId, isFolder)}
+                            style={{ textAlign: 'left', flex: 1, textDecoration: 'none', color: 'var(--accent)', cursor: 'pointer', background: 'none', border: 'none', padding: '0', fontWeight: '500' }}
+                          >
+                            {displayName}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
+            </div>
           ) : (
-            <ul role="listbox" aria-label="Tracks in this audiobook" style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <ul role="listbox" aria-label="Tracks in this audiobook" style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: 0 }}>
               {trackList.map((track, index) => {
                 const name = track.substring(track.lastIndexOf('\\') + 1)
                 const isCurrent = index === currentTrackIndex
+                const isSkipped = skippedTracks.includes(track)
                 return (
                   <li 
                     key={track}
                     role="option"
                     aria-selected={isCurrent}
                     tabIndex={0}
-                    onClick={() => loadTrack(index, 0)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        loadTrack(index, 0)
-                      }
-                    }}
                     style={{
-                      padding: '0.75rem',
+                      padding: '0.5rem 0.75rem',
                       borderRadius: '8px',
-                      cursor: 'pointer',
                       border: isCurrent ? '2px solid var(--accent)' : '1px solid var(--border)',
                       background: isCurrent ? 'var(--accent-glow)' : 'transparent',
-                      fontWeight: isCurrent ? '600' : 'normal'
+                      fontWeight: isCurrent ? '600' : 'normal',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.5rem',
+                      opacity: isSkipped ? 0.5 : 1
                     }}
                   >
-                    {index + 1}. {name}
+                    <div 
+                      onClick={() => loadTrack(index, 0)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          loadTrack(index, 0)
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`Play track ${index + 1}: ${name}`}
+                      style={{ flex: 1, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      {index + 1}. {name}
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={isSkipped} 
+                        onChange={() => toggleTrackSkip(track)}
+                        aria-label={`Skip track ${index + 1}`}
+                        title="Skip track on auto-advance"
+                      />
+                      <button 
+                        className="btn" 
+                        onClick={(e) => { e.stopPropagation(); moveTrack(index, 'up'); }}
+                        disabled={index === 0}
+                        aria-label={`Move track ${index + 1} up`}
+                        title="Move Up"
+                        style={{ padding: '0.1rem 0.3rem', fontSize: '0.75rem' }}
+                      >
+                        ▲
+                      </button>
+                      <button 
+                        className="btn" 
+                        onClick={(e) => { e.stopPropagation(); moveTrack(index, 'down'); }}
+                        disabled={index === trackList.length - 1}
+                        aria-label={`Move track ${index + 1} down`}
+                        title="Move Down"
+                        style={{ padding: '0.1rem 0.3rem', fontSize: '0.75rem' }}
+                      >
+                        ▼
+                      </button>
+                    </div>
                   </li>
                 )
               })}
@@ -859,14 +1250,22 @@ export default function App() {
           <div className="glass-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2>{bookName}</h2>
-              <div role="tablist" aria-label="Sections" style={{ display: 'flex', gap: '0.5rem' }}>
+              <div role="tablist" aria-label="Sections" style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
                 <button 
                   role="tab" 
                   aria-selected={activeTab === 'media'} 
                   className={`btn ${activeTab === 'media' ? 'btn-primary' : ''}`}
                   onClick={() => { setActiveTab('media'); announce('Viewing study clips and bookmarks tab'); }}
                 >
-                  Clips & Bookmarks
+                  Clips
+                </button>
+                <button 
+                  role="tab" 
+                  aria-selected={activeTab === 'collections'} 
+                  className={`btn ${activeTab === 'collections' ? 'btn-primary' : ''}`}
+                  onClick={() => { setActiveTab('collections'); announce('Viewing collections tab'); }}
+                >
+                  Collections
                 </button>
                 <button 
                   role="tab" 
@@ -875,6 +1274,22 @@ export default function App() {
                   onClick={() => { setActiveTab('stats'); announce('Viewing listening stats tab'); }}
                 >
                   Statistics
+                </button>
+                <button 
+                  role="tab" 
+                  aria-selected={activeTab === 'settings'} 
+                  className={`btn ${activeTab === 'settings' ? 'btn-primary' : ''}`}
+                  onClick={() => { setActiveTab('settings'); announce('Viewing settings tab'); }}
+                >
+                  Settings
+                </button>
+                <button 
+                  role="tab" 
+                  aria-selected={activeTab === 'help'} 
+                  className={`btn ${activeTab === 'help' ? 'btn-primary' : ''}`}
+                  onClick={() => { setActiveTab('help'); announce('Viewing help guide tab'); }}
+                >
+                  Help
                 </button>
               </div>
             </div>
@@ -904,7 +1319,7 @@ export default function App() {
                   {bookmarks.length === 0 ? (
                     <p style={{ color: 'var(--text-muted)' }}>No bookmarks saved yet</p>
                   ) : (
-                    <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', listStyle: 'none' }}>
+                    <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', listStyle: 'none', padding: 0 }}>
                       {bookmarks.map((b) => (
                         <li key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(0,0,0,0.1)', borderRadius: '6px' }}>
                           <span>{b.name} ({formatTime(b.timestamp)})</span>
@@ -995,17 +1410,49 @@ export default function App() {
                       aria-label="Tags for this clip"
                       style={{ flex: '1 1 calc(100% - 160px)' }}
                     />
+                    {collections.length > 0 && (
+                      <select 
+                        className="input" 
+                        value={selectedCollectionId} 
+                        onChange={(e) => setSelectedCollectionId(e.target.value)}
+                        aria-label="Select collection for highlight"
+                        style={{ flex: '1 1 100%' }}
+                      >
+                        <option value="">No Collection</option>
+                        {collections.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    )}
                     <button className="btn btn-primary" onClick={addHighlight} style={{ width: '150px' }}>
                       <Plus size={18} aria-hidden="true" />
                       <span>Save Highlight</span>
                     </button>
                   </div>
 
+                  {highlights.length > 0 && (
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
+                      <label htmlFor="tag-filter">Filter clips by tag:</label>
+                      <input 
+                        id="tag-filter"
+                        type="text" 
+                        className="input" 
+                        value={tagFilter} 
+                        onChange={(e) => setTagFilter(e.target.value)}
+                        placeholder="Tag name"
+                        style={{ flex: 1 }}
+                      />
+                    </div>
+                  )}
+
                   {highlights.length === 0 ? (
                     <p style={{ color: 'var(--text-muted)' }}>No highlights saved yet</p>
                   ) : (
-                    <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', listStyle: 'none' }}>
-                      {getSortedHighlights(highlights).map((h) => {
+                    <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', listStyle: 'none', padding: 0 }}>
+                      {getSortedHighlights(highlights).filter(h => {
+                        if (!tagFilter) return true
+                        return h.tags.some(t => t.toLowerCase().includes(tagFilter.toLowerCase()))
+                      }).map((h) => {
                         const isCurrentlyLooping = activeLoopClip?.id === h.id
                         return (
                           <li key={h.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem', background: 'rgba(0,0,0,0.1)', borderRadius: '6px', border: isCurrentlyLooping ? '1.5px solid var(--accent)' : 'none' }}>
@@ -1047,7 +1494,79 @@ export default function App() {
                   )}
                 </div>
               </>
-            ) : (
+            ) : activeTab === 'collections' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <h3>Collections Manager</h3>
+                
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <input 
+                    type="text" 
+                    className="input" 
+                    value={newCollectionName} 
+                    onChange={(e) => setNewCollectionName(e.target.value)}
+                    placeholder="Collection Name (e.g. Exam formulas)" 
+                    aria-label="New collection name"
+                    style={{ flex: 1 }}
+                  />
+                  <input 
+                    type="text" 
+                    className="input" 
+                    value={newCollectionDesc} 
+                    onChange={(e) => setNewCollectionDesc(e.target.value)}
+                    placeholder="Short description" 
+                    aria-label="New collection description"
+                    style={{ flex: 2 }}
+                  />
+                  <button className="btn btn-primary" onClick={createCollection}>Create Collection</button>
+                </div>
+
+                {collections.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)' }}>No collections created yet</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    {collections.map(col => {
+                      const colHighlights = highlights.filter(h => h.collectionId === col.id)
+                      
+                      return (
+                        <div key={col.id} style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
+                            <div>
+                              <h4>{col.name}</h4>
+                              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{col.description}</p>
+                            </div>
+                            <button className="btn" onClick={() => deleteCollection(col.id)} aria-label={`Delete collection ${col.name}`}>
+                              <Trash2 size={16} aria-hidden="true" />
+                            </button>
+                          </div>
+                          
+                          {colHighlights.length === 0 ? (
+                            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>No highlights assigned to this collection</p>
+                          ) : (
+                            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: 0 }}>
+                              {colHighlights.map(h => (
+                                <li key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(0,0,0,0.1)', borderRadius: '6px' }}>
+                                  <span>{h.name} ({formatTime(h.startTimestamp)} - {formatTime(h.endTimestamp)})</span>
+                                  <div style={{ display: 'flex', gap: '0.25rem' }}>
+                                    <button className="btn" onClick={() => playClip(h, false)} aria-label={`Play clip ${h.name}`}>Play</button>
+                                    <button className="btn" onClick={async () => {
+                                      const updatedH = highlights.map(item => item.id === h.id ? { ...item, collectionId: null } : item)
+                                      setHighlights(updatedH)
+                                      announce('Removed from collection')
+                                    }}>
+                                      Remove
+                                    </button>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : activeTab === 'stats' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 <h3>Listening Statistics</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -1066,7 +1585,7 @@ export default function App() {
                 </div>
                 
                 <h4>Daily Breakdown (Last 7 Days)</h4>
-                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: 0 }}>
                   {Object.entries(stats).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7).map(([date, seconds]) => (
                     <li key={date} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: '6px' }}>
                       <span>{date}</span>
@@ -1074,6 +1593,153 @@ export default function App() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            ) : activeTab === 'settings' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <h3>Application Settings</h3>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label htmlFor="setting-rewind">Auto-Rewind on Resume:</label>
+                  <select 
+                    id="setting-rewind"
+                    className="input"
+                    value={settings.rewindSeconds}
+                    onChange={(e) => updateSetting('rewindSeconds', parseInt(e.target.value, 10))}
+                    style={{ width: '150px' }}
+                  >
+                    <option value="0">Off</option>
+                    <option value="3">3 seconds</option>
+                    <option value="5">5 seconds</option>
+                    <option value="10">10 seconds</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label htmlFor="setting-theme">Color Theme:</label>
+                  <select 
+                    id="setting-theme"
+                    className="input"
+                    value={settings.theme}
+                    onChange={(e) => updateSetting('theme', e.target.value as any)}
+                    style={{ width: '150px' }}
+                  >
+                    <option value="dark">Dark Theme</option>
+                    <option value="light">Light Theme</option>
+                    <option value="high-contrast">High Contrast</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label htmlFor="setting-size">Button & Text Size:</label>
+                  <select 
+                    id="setting-size"
+                    className="input"
+                    value={settings.buttonSize}
+                    onChange={(e) => updateSetting('buttonSize', e.target.value as any)}
+                    style={{ width: '150px' }}
+                  >
+                    <option value="small">Small Buttons</option>
+                    <option value="normal">Normal Buttons</option>
+                    <option value="large">Large Buttons</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label htmlFor="setting-speed">Default Playback Speed:</label>
+                  <select 
+                    id="setting-speed"
+                    className="input"
+                    value={settings.defaultSpeed}
+                    onChange={(e) => updateSetting('defaultSpeed', parseFloat(e.target.value))}
+                    style={{ width: '150px' }}
+                  >
+                    <option value="0.5">0.5x</option>
+                    <option value="1.0">1.0x</option>
+                    <option value="1.25">1.25x</option>
+                    <option value="1.5">1.5x</option>
+                    <option value="1.75">1.75x</option>
+                    <option value="2.0">2.0x</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label htmlFor="setting-verbosity">Screen Reader Announcement Verbosity:</label>
+                  <select 
+                    id="setting-verbosity"
+                    className="input"
+                    value={settings.verbosity}
+                    onChange={(e) => updateSetting('verbosity', e.target.value as any)}
+                    style={{ width: '150px' }}
+                  >
+                    <option value="verbose">Verbose (All alerts)</option>
+                    <option value="normal">Normal (Status alerts)</option>
+                    <option value="minimal">Minimal (Errors only)</option>
+                  </select>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <h4>Software Auto-Updates</h4>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Current Version: <strong>1.0.0</strong> (Status: {updateStatus})</span>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button className="btn" onClick={handleCheckForUpdates}>Check for Updates</button>
+                      {updateStatus === 'downloaded' && (
+                        <button className="btn btn-primary" onClick={handleInstallUpdate}>Restart & Install</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <h4>Backup & Data Export</h4>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button className="btn" onClick={handleBackupDb}>Backup Database</button>
+                    <button className="btn" onClick={handleRestoreDb}>Restore Database</button>
+                    {bookId && (
+                      <>
+                        <button className="btn" onClick={handleExportBook}>Export Book Metadata</button>
+                        <button className="btn" onClick={handleImportBook}>Import Book Metadata</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '400px', overflowY: 'auto' }}>
+                <h3>Help & User Guide</h3>
+                <p>Welcome to the Accessible Audiobook Player! Here is a guide to using the application and its keyboard shortcuts.</p>
+                
+                <h4>Core Keyboard Shortcuts</h4>
+                <ul style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  <li><strong>Spacebar</strong>: Play / Pause</li>
+                  <li><strong>Arrow Left / Right</strong>: Seek backward / forward 10 seconds</li>
+                  <li><strong>Arrow Up / Down</strong>: Increase / decrease volume by 5% (volume can go up to 200% software boost!)</li>
+                  <li><strong>Page Up / Page Down</strong>: Skip to previous / next non-skipped track</li>
+                  <li><strong>Home / End</strong>: Jump to the start / end of the current track</li>
+                  <li><strong>Slash (/)</strong>: Focus the "Jump to Time" box. Type time (e.g. 13:25) and press Enter to navigate.</li>
+                </ul>
+
+                <h4>Study Clip (Highlight) Shortcuts</h4>
+                <ul style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  <li><strong>[ (Left Bracket)</strong>: Mark Highlight Start Time at current playing second</li>
+                  <li><strong>] (Right Bracket)</strong>: Mark Highlight End Time at current playing second</li>
+                  <li><strong>Ctrl + H</strong>: Go to Highlights tab and focus the clip name label input box</li>
+                  <li><strong>Ctrl + N</strong>: Move focus directly to the clip notes input field</li>
+                  <li><strong>Ctrl + D</strong>: Save bookmark at current timestamp and focus name box</li>
+                </ul>
+
+                <h4>Speed & Mode Shortcuts</h4>
+                <ul style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  <li><strong>- (Minus) / + (Plus/Equals)</strong>: Decrease / increase playback speed by 0.1x (range 0.5x to 3.0x)</li>
+                  <li><strong>S Key</strong>: Cycle speed through preset intervals (1.0x, 1.25x, 1.5x, etc.)</li>
+                  <li><strong>R Key</strong>: Cycle Repeat mode (Off, Track repeat, Folder loop)</li>
+                  <li><strong>H Key</strong>: Toggle Shuffle playback</li>
+                  <li><strong>T Key</strong>: Toggle tab views between Clips and Statistics</li>
+                  <li><strong>Ctrl + T</strong>: Cycle Sleep Timer (Off, 10 minutes, 20 minutes, or End of Track)</li>
+                </ul>
+
+                <h4>How to Create Highlights</h4>
+                <p>Start playing an audio file. Press <strong>[</strong> to set the start timestamp and <strong>]</strong> to set the end timestamp. Type a name and notes, then click "Save Highlight". To repeat a saved clip, click the "Loop" button next to it.</p>
               </div>
             )}
           </div>
@@ -1167,6 +1833,14 @@ export default function App() {
               aria-label={`Repeat mode: ${repeatMode === 'off' ? 'off' : repeatMode === 'track' ? 'repeat track' : 'repeat folder'}`}
             >
               Repeat: {repeatMode === 'off' ? 'Off' : repeatMode === 'track' ? 'Track' : 'Folder'}
+            </button>
+            <button 
+              className={`btn ${sleepTimerActive ? 'btn-primary' : ''}`} 
+              onClick={cycleSleepTimer}
+              title="Sleep Timer" 
+              aria-label={`Sleep timer: ${sleepMode === 'off' ? 'off' : sleepMode === 'track' ? 'end of track' : `${sleepTimer} minutes`}`}
+            >
+              Sleep: {sleepMode === 'off' ? 'Off' : sleepMode === 'track' ? 'Track' : `${sleepTimer}m`}
             </button>
           </div>
 

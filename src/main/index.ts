@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, protocol, net } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { db } from './db'
+import { autoUpdater } from 'electron-updater'
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.m4a', '.m4b', '.wav', '.flac', '.ogg', '.opus', '.aac'])
 
@@ -47,6 +48,23 @@ app.whenReady().then(() => {
 
   createWindow()
 
+  // Setup autoUpdater listeners to relay events to renderer
+  autoUpdater.on('checking-for-update', () => {
+    mainWindow?.webContents.send('update-status', 'checking')
+  })
+  autoUpdater.on('update-available', () => {
+    mainWindow?.webContents.send('update-status', 'available')
+  })
+  autoUpdater.on('update-not-available', () => {
+    mainWindow?.webContents.send('update-status', 'not-available')
+  })
+  autoUpdater.on('error', (err) => {
+    mainWindow?.webContents.send('update-status', `error: ${err.message || 'unknown error'}`)
+  })
+  autoUpdater.on('update-downloaded', () => {
+    mainWindow?.webContents.send('update-status', 'downloaded')
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
@@ -86,6 +104,46 @@ ipcMain.handle('dialog:selectFile', async () => {
   return result.filePaths[0]
 })
 
+ipcMain.handle('dialog:exportPath', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export Audiobook Data',
+    defaultPath: 'audiobook-data.json',
+    filters: [{ name: 'JSON Files', extensions: ['json'] }]
+  })
+  return result.canceled ? null : result.filePath
+})
+
+ipcMain.handle('dialog:importPath', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import Audiobook Data',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON Files', extensions: ['json'] }]
+  })
+  return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+})
+
+ipcMain.handle('dialog:backupPath', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Backup Database',
+    defaultPath: 'player-db-backup.json',
+    filters: [{ name: 'JSON Files', extensions: ['json'] }]
+  })
+  return result.canceled ? null : result.filePath
+})
+
+ipcMain.handle('dialog:restorePath', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Restore Database',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON Files', extensions: ['json'] }]
+  })
+  return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+})
+
 // Folder scanning
 ipcMain.handle('audio:loadFolder', async (_event, folderPath: string) => {
   try {
@@ -111,6 +169,7 @@ ipcMain.handle('audio:loadFile', async (_event, filePath: string) => {
 // Database mappings
 ipcMain.handle('db:saveHistory', (_event, history) => db.saveHistory(history))
 ipcMain.handle('db:getHistory', (_event, bookId) => db.getHistory(bookId))
+ipcMain.handle('db:getHistoryList', () => db.getHistoryList())
 ipcMain.handle('db:getBookmarks', (_event, bookId) => db.getBookmarks(bookId))
 ipcMain.handle('db:addBookmark', (_event, bookmark) => db.addBookmark(bookmark))
 ipcMain.handle('db:deleteBookmark', (_event, id) => db.deleteBookmark(id))
@@ -119,6 +178,20 @@ ipcMain.handle('db:addHighlight', (_event, highlight) => db.addHighlight(highlig
 ipcMain.handle('db:deleteHighlight', (_event, id) => db.deleteHighlight(id))
 ipcMain.handle('db:incrementDailyStats', (_event, seconds) => db.incrementDailyStats(seconds))
 ipcMain.handle('db:getStats', () => db.getStats())
+ipcMain.handle('db:getSettings', () => db.getSettings())
+ipcMain.handle('db:saveSettings', (_event, settings) => db.saveSettings(settings))
+ipcMain.handle('db:getCollections', () => db.getCollections())
+ipcMain.handle('db:saveCollections', (_event, cols) => db.saveCollections(cols))
+ipcMain.handle('db:savePlaylistSettings', (_event, bookId, skipped, order) => db.savePlaylistSettings(bookId, skipped, order))
+ipcMain.handle('db:getPlaylistSettings', (_event, bookId) => db.getPlaylistSettings(bookId))
+ipcMain.handle('db:backupDatabase', (_event, path) => db.backupDatabase(path))
+ipcMain.handle('db:restoreDatabase', (_event, path) => db.restoreDatabase(path))
+ipcMain.handle('db:exportBookData', (_event, bookId, path) => db.exportBookData(bookId, path))
+ipcMain.handle('db:importBookData', (_event, bookId, path) => db.importBookData(bookId, path))
+
+// Auto Updater triggers
+ipcMain.handle('app:checkForUpdates', () => autoUpdater.checkForUpdatesAndNotify())
+ipcMain.handle('app:installUpdate', () => autoUpdater.quitAndInstall())
 
 ipcMain.on('app-close-ready', () => {
   isQuitting = true
