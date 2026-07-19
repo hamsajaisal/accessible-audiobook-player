@@ -11,22 +11,25 @@ from PyQt6.QtWidgets import (
     QMessageBox, QCheckBox, QFrame, QSplitter
 )
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QKeySequence, QShortcut, QAccessible, QAccessibleEvent
 
 from db_manager import DBManager
 
 def announce(text):
-    """Announce text natively to assistive technologies (screen readers) using QAccessibleAnnouncementEvent."""
+    """Announce text natively to assistive technologies (screen readers) using status_announcer or QAccessibleEvent."""
     try:
-        from PyQt6.QtGui import QAccessible, QAccessibleAnnouncementEvent
+        from PyQt6.QtGui import QAccessible, QAccessibleEvent
         from PyQt6.QtWidgets import QApplication
         
         app = QApplication.instance()
         if app:
-            target = app.activeWindow() or app
-            event = QAccessibleAnnouncementEvent(target, text)
-            QAccessible.updateAccessibility(event)
-            return
+            window = app.activeWindow()
+            if window and hasattr(window, 'status_announcer'):
+                window.status_announcer.setText(text)
+                window.status_announcer.setAccessibleName(text)
+                event = QAccessibleEvent(window.status_announcer, QAccessible.Event.NameChanged)
+                QAccessible.updateAccessibility(event)
+                return
     except Exception as e:
         print("Screen reader announcement failed:", e)
     
@@ -77,6 +80,9 @@ class AccessibleAudiobookPlayer(QMainWindow):
         self.apply_theme()
         self.setup_shortcuts()
 
+        # Install global event filter for Up/Down arrow key volume control
+        QApplication.instance().installEventFilter(self)
+
         # Check launch arguments (Open With file)
         self.check_launch_arguments()
 
@@ -86,6 +92,12 @@ class AccessibleAudiobookPlayer(QMainWindow):
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
 
     def init_ui(self):
+        # Status Bar & Accessibility Announcer
+        self.status_bar = self.statusBar()
+        self.status_announcer = QLabel("")
+        self.status_announcer.setAccessibleRole(QAccessible.Role.Alert)
+        self.status_bar.addWidget(self.status_announcer)
+
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
@@ -95,9 +107,15 @@ class AccessibleAudiobookPlayer(QMainWindow):
         self.setMenuBar(self.menu_bar)
 
         file_menu = self.menu_bar.addMenu("&File")
-        file_menu.addAction("&Open Folder", self.select_folder)
-        file_menu.addAction("Open &File", self.select_file)
-        file_menu.addAction("&Import Folder to Library", self.import_folder_to_library)
+        
+        action_open_folder = file_menu.addAction("&Open Folder", self.select_folder)
+        action_open_folder.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        
+        action_open_file = file_menu.addAction("Open &File", self.select_file)
+        action_open_file.setShortcut(QKeySequence("Ctrl+O"))
+        
+        action_import = file_menu.addAction("&Import Folder to Library", self.import_folder_to_library)
+        action_import.setShortcut(QKeySequence("Ctrl+I"))
         file_menu.addSeparator()
         file_menu.addAction("Backup Database", self.backup_database)
         file_menu.addAction("Restore Database", self.restore_database)
@@ -819,6 +837,8 @@ class AccessibleAudiobookPlayer(QMainWindow):
                 self.player.setPosition(target_ms)
                 announce(f"Jumped to {self.format_time(target_ms // 1000)}")
                 self.jump_time_input.clear()
+                self.jump_time_input.clearFocus()
+                self.setFocus() # Focus main window so spacebar play shortcut works instantly
             else:
                 announce("Time is out of range")
         except Exception:
@@ -1464,6 +1484,23 @@ class AccessibleAudiobookPlayer(QMainWindow):
     def closeEvent(self, event):
         self.stop_playback()
         event.accept()
+
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                # If currently focused widget is QLineEdit, let it handle the up/down keys normally
+                from PyQt6.QtWidgets import QLineEdit
+                if isinstance(QApplication.focusWidget(), QLineEdit):
+                    return super().eventFilter(obj, event)
+                
+                # Otherwise, adjust volume globally
+                if event.key() == Qt.Key.Key_Up:
+                    self.adjust_volume(5)
+                else:
+                    self.adjust_volume(-5)
+                return True # Consume keypress event
+        return super().eventFilter(obj, event)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

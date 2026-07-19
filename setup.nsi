@@ -5,7 +5,7 @@
 !define DESCRIPTION "Accessibility-first audiobook and music player"
 !define VERSIONMAJOR 1
 !define VERSIONMINOR 1
-!define VERSIONBUILD 4
+!define VERSIONBUILD 5
 
 Name "${APPNAME}"
 OutFile "dist\AccessibleAudiobookPlayer-Setup.exe"
@@ -51,6 +51,23 @@ Section "Accessible Audiobook Player (Required)" SecApp
   
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
   CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\AccessibleAudiobookPlayer.exe" "" "$INSTDIR\AccessibleAudiobookPlayer.exe" 0
+
+  # File associations for Open With
+  WriteRegStr HKLM "Software\Classes\AccessibleAudiobookPlayer.AssocFile" "" "Accessible Audio File"
+  WriteRegStr HKLM "Software\Classes\AccessibleAudiobookPlayer.AssocFile\shell\open\command" "" '"$INSTDIR\AccessibleAudiobookPlayer.exe" "%1"'
+  WriteRegStr HKLM "Software\Classes\AccessibleAudiobookPlayer.AssocFile\DefaultIcon" "" '"$INSTDIR\AccessibleAudiobookPlayer.exe",0'
+
+  # Register ProgID for extensions
+  WriteRegStr HKLM "Software\Classes\.mp3\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile" ""
+  WriteRegStr HKLM "Software\Classes\.wav\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile" ""
+  WriteRegStr HKLM "Software\Classes\.flac\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile" ""
+  WriteRegStr HKLM "Software\Classes\.m4a\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile" ""
+  WriteRegStr HKLM "Software\Classes\.m4b\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile" ""
+  WriteRegStr HKLM "Software\Classes\.ogg\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile" ""
+  WriteRegStr HKLM "Software\Classes\.opus\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile" ""
+  
+  # Notify shell of changes
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 SectionEnd
 
 Section "Create Desktop Shortcut" SecDesktop
@@ -74,4 +91,16 @@ Section "Uninstall"
   
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
   DeleteRegKey HKLM "Software\${APPNAME}"
+
+  # Clean up file associations
+  DeleteRegKey HKLM "Software\Classes\AccessibleAudiobookPlayer.AssocFile"
+  DeleteRegValue HKLM "Software\Classes\.mp3\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile"
+  DeleteRegValue HKLM "Software\Classes\.wav\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile"
+  DeleteRegValue HKLM "Software\Classes\.flac\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile"
+  DeleteRegValue HKLM "Software\Classes\.m4a\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile"
+  DeleteRegValue HKLM "Software\Classes\.m4b\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile"
+  DeleteRegValue HKLM "Software\Classes\.ogg\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile"
+  DeleteRegValue HKLM "Software\Classes\.opus\OpenWithProgids" "AccessibleAudiobookPlayer.AssocFile"
+  
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 SectionEnd

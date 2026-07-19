@@ -41,13 +41,13 @@ jobs:
 
       - name: Zip Executable
         run: |
-          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.1.4-win.zip
+          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.1.5-win.zip
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/AccessibleAudiobookPlayer-Setup.exe
-            dist/AccessibleAudiobookPlayer-v1.1.4-win.zip
+            dist/AccessibleAudiobookPlayer-v1.1.5-win.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
