@@ -31,15 +31,19 @@ jobs:
         run: |
           pyinstaller --noconsole --onefile --name "AccessibleAudiobookPlayer" accessible_player.py
 
+      - name: Compile NSIS Windows Installer
+        run: |
+          makensis setup.nsi
+
       - name: Zip Executable
         run: |
-          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.0.0-win.zip
+          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.1.0-win.zip
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/AccessibleAudiobookPlayer.exe
-            dist/AccessibleAudiobookPlayer-v1.0.0-win.zip
+            dist/AccessibleAudiobookPlayer-Setup.exe
+            dist/AccessibleAudiobookPlayer-v1.1.0-win.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
