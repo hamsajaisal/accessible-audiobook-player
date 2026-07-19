@@ -5,7 +5,7 @@
 !define DESCRIPTION "Accessibility-first audiobook and music player"
 !define VERSIONMAJOR 1
 !define VERSIONMINOR 1
-!define VERSIONBUILD 5
+!define VERSIONBUILD 6
 
 Name "${APPNAME}"
 OutFile "dist\AccessibleAudiobookPlayer-Setup.exe"

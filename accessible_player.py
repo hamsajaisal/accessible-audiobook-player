@@ -11,25 +11,31 @@ from PyQt6.QtWidgets import (
     QMessageBox, QCheckBox, QFrame, QSplitter
 )
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PyQt6.QtGui import QKeySequence, QShortcut, QAccessible, QAccessibleEvent
+from PyQt6.QtGui import QKeySequence, QShortcut
+try:
+    from PyQt6.QtGui import QAccessible, QAccessibleEvent
+    HAS_ACCESSIBILITY = True
+except ImportError:
+    HAS_ACCESSIBILITY = False
+    QAccessible = None
+    QAccessibleEvent = None
 
 from db_manager import DBManager
 
 def announce(text):
     """Announce text natively to assistive technologies (screen readers) using status_announcer or QAccessibleEvent."""
     try:
-        from PyQt6.QtGui import QAccessible, QAccessibleEvent
-        from PyQt6.QtWidgets import QApplication
-        
-        app = QApplication.instance()
-        if app:
-            window = app.activeWindow()
-            if window and hasattr(window, 'status_announcer'):
-                window.status_announcer.setText(text)
-                window.status_announcer.setAccessibleName(text)
-                event = QAccessibleEvent(window.status_announcer, QAccessible.Event.NameChanged)
-                QAccessible.updateAccessibility(event)
-                return
+        if HAS_ACCESSIBILITY:
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                window = app.activeWindow()
+                if window and hasattr(window, 'status_announcer') and window.status_announcer:
+                    window.status_announcer.setText(text)
+                    window.status_announcer.setAccessibleName(text)
+                    event = QAccessibleEvent(window.status_announcer, QAccessible.Event.NameChanged)
+                    QAccessible.updateAccessibility(event)
+                    return
     except Exception as e:
         print("Screen reader announcement failed:", e)
     
@@ -95,7 +101,8 @@ class AccessibleAudiobookPlayer(QMainWindow):
         # Status Bar & Accessibility Announcer
         self.status_bar = self.statusBar()
         self.status_announcer = QLabel("")
-        self.status_announcer.setAccessibleRole(QAccessible.Role.Alert)
+        if HAS_ACCESSIBILITY:
+            self.status_announcer.setAccessibleRole(QAccessible.Role.Alert)
         self.status_bar.addWidget(self.status_announcer)
 
         self.central_widget = QWidget()

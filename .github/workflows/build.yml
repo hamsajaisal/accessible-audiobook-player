@@ -27,6 +27,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt6 pyinstaller
 
+      - name: Verify PyQt6 and QAccessible
+        run: |
+          python -c "import PyQt6.QtGui; print('QtGui dir:', dir(PyQt6.QtGui)); print('Has QAccessible:', hasattr(PyQt6.QtGui, 'QAccessible'))"
+
       - name: Install NSIS
         run: |
           choco install nsis -y
@@ -41,13 +45,13 @@ jobs:
 
       - name: Zip Executable
         run: |
-          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.1.5-win.zip
+          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.1.6-win.zip
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/AccessibleAudiobookPlayer-Setup.exe
-            dist/AccessibleAudiobookPlayer-v1.1.5-win.zip
+            dist/AccessibleAudiobookPlayer-v1.1.6-win.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
