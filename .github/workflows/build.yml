@@ -16,19 +16,30 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 20
-          cache: 'npm'
+          python-version: '3.11'
+          cache: 'pip'
 
       - name: Install Dependencies
-        run: npm install
-
-      - name: Compile and Bundle App (Windows)
         run: |
-          npm run compile-main
-          npx vite build
-          npx electron-builder --win
+          python -m pip install --upgrade pip
+          pip install PyQt6 pyinstaller
+
+      - name: Build Standalone Executable
+        run: |
+          pyinstaller --noconsole --onefile --name "AccessibleAudiobookPlayer" accessible_player.py
+
+      - name: Zip Executable
+        run: |
+          Compress-Archive -Path dist/AccessibleAudiobookPlayer.exe -DestinationPath dist/AccessibleAudiobookPlayer-v1.0.0-win.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/AccessibleAudiobookPlayer.exe
+            dist/AccessibleAudiobookPlayer-v1.0.0-win.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
