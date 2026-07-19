@@ -576,11 +576,41 @@ export default function App() {
   // Keyboard Shortcuts Handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Skip hotkeys if user is focusing an input field
-      if (document.activeElement?.tagName === 'INPUT' && (document.activeElement as HTMLInputElement).type === 'text') {
+      const isInputFocused = document.activeElement?.tagName === 'INPUT' && (document.activeElement as HTMLInputElement).type === 'text'
+      
+      // If user is focusing an input field, only allow Control key combinations to pass through
+      if (isInputFocused && !e.ctrlKey) {
         return
       }
 
+      // Check Control keys first
+      if (e.ctrlKey) {
+        if (e.code === 'KeyH') {
+          e.preventDefault()
+          setActiveTab('media')
+          announce('Viewing highlights tab')
+          const clipInput = document.querySelector('input[placeholder="Clip label (e.g. Definition of velocity)"]') as HTMLInputElement
+          if (clipInput) clipInput.focus()
+        } else if (e.code === 'KeyD') {
+          e.preventDefault()
+          setActiveTab('media')
+          addBookmark()
+          const bookmarkInput = document.querySelector('input[placeholder="Bookmark description"]') as HTMLInputElement
+          if (bookmarkInput) bookmarkInput.focus()
+        } else if (e.code === 'KeyN') {
+          e.preventDefault()
+          setActiveTab('media')
+          const notesInput = document.querySelector('input[placeholder="Attach study notes"]') as HTMLInputElement
+          if (notesInput) {
+            notesInput.focus()
+            notesInput.select()
+            announce('Type notes for clip')
+          }
+        }
+        return
+      }
+
+      // Standard non-control keys
       if (e.code === 'Space') {
         e.preventDefault()
         handlePlayPause()
@@ -604,6 +634,47 @@ export default function App() {
       } else if (e.code === 'PageDown') {
         e.preventDefault()
         handleTrackChange('next')
+      } else if (e.code === 'Slash') {
+        e.preventDefault()
+        const inputEl = document.querySelector('input[placeholder="Go to e.g. 13:25"]') as HTMLInputElement
+        if (inputEl) {
+          inputEl.focus()
+          inputEl.select()
+          announce('Jump to time active. Type duration and press Enter.')
+        }
+      } else if (e.code === 'BracketLeft') {
+        e.preventDefault()
+        setHighlightStart(Math.floor(currentTime).toString())
+        announce(`Start time set to ${formatTime(currentTime)}`)
+      } else if (e.code === 'BracketRight') {
+        e.preventDefault()
+        setHighlightEnd(Math.floor(currentTime).toString())
+        announce(`End time set to ${formatTime(currentTime)}`)
+      } else if (e.code === 'Minus') {
+        e.preventDefault()
+        const nextSpeed = Math.max(0.5, Math.round((speed - 0.1) * 10) / 10)
+        setSpeed(nextSpeed)
+        announce(`Speed decreased to ${nextSpeed}x`)
+      } else if (e.code === 'Equal') {
+        e.preventDefault()
+        const nextSpeed = Math.min(3.0, Math.round((speed + 0.1) * 10) / 10)
+        setSpeed(nextSpeed)
+        announce(`Speed increased to ${nextSpeed}x`)
+      } else if (e.code === 'Home') {
+        e.preventDefault()
+        if (audioRef.current) {
+          audioRef.current.currentTime = 0
+          setCurrentTime(0)
+          announce('Jumped to start of track')
+        }
+      } else if (e.code === 'End') {
+        e.preventDefault()
+        if (audioRef.current && duration) {
+          const target = Math.max(0, duration - 1)
+          audioRef.current.currentTime = target
+          setCurrentTime(target)
+          announce('Jumped to end of track')
+        }
       } else if (e.code === 'KeyB') {
         e.preventDefault()
         addBookmark()
@@ -645,12 +716,26 @@ export default function App() {
         e.preventDefault()
         const inputEl = document.querySelector('input[placeholder="Bookmark description"]') as HTMLInputElement
         if (inputEl) inputEl.focus()
+      } else {
+        // Percent jumps (1-9, 0)
+        const digitMatch = e.code.match(/^Digit([0-9])$/)
+        if (digitMatch) {
+          e.preventDefault()
+          const num = parseInt(digitMatch[1], 10)
+          const percent = num === 0 ? 1.0 : num / 10.0
+          const targetTime = duration * percent
+          if (audioRef.current && !isNaN(targetTime)) {
+            audioRef.current.currentTime = targetTime
+            setCurrentTime(targetTime)
+            announce(`Jumped to ${num === 0 ? '100%' : `${num * 10}%`} of the track`)
+          }
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isPlaying, currentTrackIndex, trackList, volume, currentTime, skipInterval, speed, repeatMode])
+  }, [isPlaying, currentTrackIndex, trackList, volume, currentTime, skipInterval, speed, repeatMode, duration])
 
 
   // Helpers
